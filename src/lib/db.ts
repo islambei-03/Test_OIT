@@ -115,7 +115,7 @@ export async function getNextAttemptNo(fio: string, exam_type: ExamType) {
 export async function saveExamAttempt(input: SaveExamAttemptInput) {
   const supabase = requireSupabase()
   // supabase jsonb хранит массивы/объекты как есть
-  const { error } = await supabase.from('exam_attempts').insert({
+  const basePayload = {
     fio: input.fio,
     exam_type: input.exam_type,
     attempt_no: input.attempt_no,
@@ -126,10 +126,26 @@ export async function saveExamAttempt(input: SaveExamAttemptInput) {
     correct_count: input.correct_count,
     wrong_count: input.wrong_count,
     passed: input.passed,
-    question_count: input.question_count,
     errors: input.errors,
     weak_topics: input.weak_topics,
+  }
+
+  // На старых БД может не быть колонки question_count.
+  // Поэтому делаем попытку с question_count, а при ошибке — повторяем без неё (будет default).
+  const { error } = await supabase.from('exam_attempts').insert({
+    ...basePayload,
+    question_count: input.question_count,
   })
+
+  if (!error) return
+
+  const msg = String(error.message ?? '')
+  if (/question_count/i.test(msg)) {
+    const { error: error2 } = await supabase.from('exam_attempts').insert(basePayload)
+    const err2 = toAppError('exam_attempts insert', error2)
+    if (err2) throw err2
+    return
+  }
 
   const err = toAppError('exam_attempts insert', error)
   if (err) throw err

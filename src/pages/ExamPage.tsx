@@ -65,6 +65,7 @@ export default function ExamPage() {
 
   const [fio, setFio] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [examQuestionCount, setExamQuestionCount] = useState(20)
 
   const [session, setSession] = useState<{
@@ -177,6 +178,7 @@ export default function ExamPage() {
     if (!session || !session.finished) return
     if (session.saved) return
     if (!catalog) return
+    setSaveError(null)
     ;(async () => {
       setSaving(true)
       try {
@@ -250,6 +252,9 @@ export default function ExamPage() {
         })
 
         setSession((s) => (s ? { ...s, saved: true, finished: true } : s))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Не удалось сохранить попытку.'
+        setSaveError(msg)
       } finally {
         setSaving(false)
       }
@@ -557,7 +562,13 @@ export default function ExamPage() {
                   <div className="text-sm font-semibold text-violet-700 dark:text-violet-400">{summary.level.name}</div>
                 </div>
                 <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  {saving ? 'Сохраняем результат...' : 'Результат сохранён в Supabase.'}
+                  {saving
+                    ? 'Сохраняем результат...'
+                    : session.saved
+                      ? 'Результат сохранён в Supabase.'
+                      : saveError
+                        ? `Ошибка сохранения: ${saveError}`
+                        : 'Не удалось сохранить попытку.'}
                 </div>
               </div>
 
@@ -574,6 +585,7 @@ export default function ExamPage() {
                     setSession(null)
                     setSelectedOptionIndex(null)
                     setSaving(false)
+                    setSaveError(null)
                   }}
                   className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
                 >
