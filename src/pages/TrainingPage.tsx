@@ -3,10 +3,14 @@ import type { Category, Question, QuestionAnswer } from '../lib/db'
 import { fetchCatalog } from '../lib/db'
 import {
   MIXED_TOPIC_ID,
+  PROFILE_ALL_TOPIC_ID,
+  PROFILE_NAME,
   TEST_VND_NAME,
   VND_ALL_TOPIC_ID,
   describeMixedComposition,
+  filterProfileQuestions,
   filterVndQuestions,
+  isProfileCategoryName,
   isVndCategoryName,
   pickMixedQuestions,
 } from '../lib/questionPools'
@@ -107,7 +111,10 @@ export default function TrainingPage() {
   const topic = useMemo(() => {
     if (!catalog) return null
     if (topicId === MIXED_TOPIC_ID) {
-      return { id: MIXED_TOPIC_ID, name: `Смешанный (⅓ ${TEST_VND_NAME} + ⅔ ИТ)` } satisfies Category
+      return { id: MIXED_TOPIC_ID, name: `Смешанный (⅓ служебные + ⅔ ИТ)` } satisfies Category
+    }
+    if (topicId === PROFILE_ALL_TOPIC_ID) {
+      return { id: PROFILE_ALL_TOPIC_ID, name: PROFILE_NAME } satisfies Category
     }
     if (topicId === VND_ALL_TOPIC_ID) {
       return { id: VND_ALL_TOPIC_ID, name: TEST_VND_NAME } satisfies Category
@@ -116,26 +123,35 @@ export default function TrainingPage() {
   }, [catalog, topicId])
 
   const isMixedTopic = topicId === MIXED_TOPIC_ID
+  const isProfileAllTopic = topicId === PROFILE_ALL_TOPIC_ID
   const isVndAllTopic = topicId === VND_ALL_TOPIC_ID
 
   const filteredQuestions = useMemo(() => {
     if (!catalog || !topicId) return []
     if (isMixedTopic) return catalog.questions
+    if (isProfileAllTopic) return filterProfileQuestions(catalog.questions, catalog.categories)
     if (isVndAllTopic) return filterVndQuestions(catalog.questions, catalog.categories)
     return catalog.questions.filter((q) => q.category_id === topicId)
-  }, [catalog, topicId, isMixedTopic, isVndAllTopic])
+  }, [catalog, topicId, isMixedTopic, isProfileAllTopic, isVndAllTopic])
 
   const mixedCompositionHint = useMemo(
     () => describeMixedComposition(Math.min(trainingQuestionCount, filteredQuestions.length || trainingQuestionCount)),
     [trainingQuestionCount, filteredQuestions.length],
   )
 
+  const profileCategories = useMemo(
+    () => (catalog ? catalog.categories.filter((c) => isProfileCategoryName(c.name)) : []),
+    [catalog],
+  )
   const vndCategories = useMemo(
     () => (catalog ? catalog.categories.filter((c) => isVndCategoryName(c.name)) : []),
     [catalog],
   )
   const itCategories = useMemo(
-    () => (catalog ? catalog.categories.filter((c) => !isVndCategoryName(c.name)) : []),
+    () =>
+      catalog
+        ? catalog.categories.filter((c) => !isProfileCategoryName(c.name) && !isVndCategoryName(c.name))
+        : [],
     [catalog],
   )
 
@@ -324,13 +340,23 @@ export default function TrainingPage() {
                   onChange={(e) => setTopicId(e.target.value)}
                   className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 >
-                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ {TEST_VND_NAME} + ⅔ ИТ)</option>
+                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ служебные + ⅔ ИТ)</option>
+                  {profileCategories.length > 0 ? (
+                    <optgroup label={PROFILE_NAME}>
+                      <option value={PROFILE_ALL_TOPIC_ID}>Все вопросы «{PROFILE_NAME}»</option>
+                      {profileCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name.replace(/^Профильные\s*[·:]\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                   {vndCategories.length > 0 ? (
                     <optgroup label={TEST_VND_NAME}>
                       <option value={VND_ALL_TOPIC_ID}>Все вопросы «{TEST_VND_NAME}»</option>
                       {vndCategories.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name.replace(/^Тест ВНД\s*[·:]\s*/i, '').replace(/^ВНД:\s*/i, '')}
+                          {c.name.replace(/^Тест ВНД\s*[·:]\s*/i, '')}
                         </option>
                       ))}
                     </optgroup>

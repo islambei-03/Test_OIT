@@ -1,9 +1,13 @@
 import type { Category, QuestionAnswer } from './db'
 
-/** Название блока вопросов ВНД в интерфейсе и префикс категорий в БД */
+export const PROFILE_NAME = 'Профильные'
+export const PROFILE_CATEGORY_PREFIX = `${PROFILE_NAME} · `
+
 export const TEST_VND_NAME = 'Тест ВНД'
 export const TEST_VND_CATEGORY_PREFIX = `${TEST_VND_NAME} · `
+
 export const MIXED_TOPIC_ID = '__mixed__'
+export const PROFILE_ALL_TOPIC_ID = '__profile_all__'
 export const VND_ALL_TOPIC_ID = '__vnd_all__'
 
 export type QuestionWithAnswers = {
@@ -14,21 +18,26 @@ export type QuestionWithAnswers = {
   answers: QuestionAnswer[]
 }
 
-export function isVndCategoryName(name: string) {
+export function isProfileCategoryName(name: string) {
   const n = name.trim()
-  return (
-    n === TEST_VND_NAME ||
-    n.startsWith(TEST_VND_CATEGORY_PREFIX) ||
-    n.startsWith(`${TEST_VND_NAME}:`) ||
-    n.startsWith('ВНД:') // старые категории до переимпорта
-  )
+  return n === PROFILE_NAME || n.startsWith(PROFILE_CATEGORY_PREFIX) || n.startsWith(`${PROFILE_NAME}:`)
 }
 
-/** Доля «Тест ВНД» ≈ 1/3, основы ИТ ≈ 2/3 (15 → 5 + 10). */
-export function splitVndItCounts(total: number) {
+export function isVndCategoryName(name: string) {
+  const n = name.trim()
+  if (isProfileCategoryName(n)) return false
+  return n === TEST_VND_NAME || n.startsWith(TEST_VND_CATEGORY_PREFIX) || n.startsWith(`${TEST_VND_NAME}:`)
+}
+
+/** Вопросы не по основам ИТ (для смешанного экзамена: ⅓ служебные + ⅔ ИТ) */
+export function isServiceDocCategoryName(name: string) {
+  return isProfileCategoryName(name) || isVndCategoryName(name)
+}
+
+export function splitServiceItCounts(total: number) {
   const safe = Math.max(1, total)
-  const vnd = Math.floor(safe / 3)
-  return { vnd, it: safe - vnd }
+  const service = Math.floor(safe / 3)
+  return { service, it: safe - service }
 }
 
 export function pluralRuQuestions(n: number) {
@@ -42,8 +51,10 @@ export function pluralRuQuestions(n: number) {
 
 export function describeMixedComposition(total: number) {
   const n = Math.max(1, total)
-  const { vnd, it } = splitVndItCounts(n)
-  return `Из ${n} ${pluralRuQuestions(n)}: ${vnd} ${pluralRuQuestions(vnd)} по «${TEST_VND_NAME}» и ${it} ${pluralRuQuestions(it)} по основам ИТ. Пропорция ≈ ⅓ и ⅔.`
+  const { service, it } = splitServiceItCounts(n)
+  const profilePart = Math.floor(service / 2)
+  const vndPart = service - profilePart
+  return `Из ${n} ${pluralRuQuestions(n)}: ~${profilePart} «${PROFILE_NAME}», ~${vndPart} «${TEST_VND_NAME}», ~${it} по основам ИТ (всего служебных ≈ ⅓).`
 }
 
 function shuffle<T>(arr: T[]) {
@@ -59,19 +70,21 @@ function pickRandom<T>(arr: T[], count: number) {
   return shuffle(arr).slice(0, Math.min(count, arr.length))
 }
 
-export function partitionQuestionsByPool(
-  questions: QuestionWithAnswers[],
-  categories: Category[],
-) {
+export function partitionQuestionsByPool(questions: QuestionWithAnswers[], categories: Category[]) {
   const nameById = new Map(categories.map((c) => [c.id, c.name]))
-  const vnd: QuestionWithAnswers[] = []
+  const service: QuestionWithAnswers[] = []
   const it: QuestionWithAnswers[] = []
   for (const q of questions) {
     const name = nameById.get(q.category_id) ?? ''
-    if (isVndCategoryName(name)) vnd.push(q)
+    if (isServiceDocCategoryName(name)) service.push(q)
     else it.push(q)
   }
-  return { vnd, it }
+  return { service, it }
+}
+
+export function filterProfileQuestions(questions: QuestionWithAnswers[], categories: Category[]) {
+  const nameById = new Map(categories.map((c) => [c.id, c.name]))
+  return questions.filter((q) => isProfileCategoryName(nameById.get(q.category_id) ?? ''))
 }
 
 export function filterVndQuestions(questions: QuestionWithAnswers[], categories: Category[]) {
@@ -79,22 +92,30 @@ export function filterVndQuestions(questions: QuestionWithAnswers[], categories:
   return questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
 }
 
-/** Смешанная выборка: ~⅓ Тест ВНД + ~⅔ ИТ */
+/** Смешанная выборка: ~⅓ (Профильные + Тест ВНД) + ~⅔ ИТ */
 export function pickMixedQuestions(
   questions: QuestionWithAnswers[],
   categories: Category[],
   total: number,
 ): QuestionWithAnswers[] {
-  const { vnd, it } = partitionQuestionsByPool(questions, categories)
-  const { vnd: wantVnd, it: wantIt } = splitVndItCounts(total)
+  const nameById = new Map(categories.map((c) => [c.id, c.name]))
+  const profile = questions.filter((q) => isProfileCategoryName(nameById.get(q.category_id) ?? ''))
+  const vnd = questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
+  const it = questions.filter((q) => !isServiceDocCategoryName(nameById.get(q.category_id) ?? ''))
 
-  let pickedVnd = pickRandom(vnd, wantVnd)
-  let pickedIt = pickRandom(it, wantIt)
+  const { service: wantService, it: wantIt } = splitServiceItCounts(total)
+  const wantProfile = Math.floor(wantService / 2)
+  const wantVnd = wantService - wantProfile
 
-  let combined = [...pickedVnd, ...pickedIt]
+  let combined = [
+    ...pickRandom(profile, wantProfile),
+    ...pickRandom(vnd, wantVnd),
+    ...pickRandom(it, wantIt),
+  ]
+
   if (combined.length < total) {
     const used = new Set(combined.map((q) => q.id))
-    const rest = shuffle([...vnd, ...it]).filter((q) => !used.has(q.id))
+    const rest = shuffle([...profile, ...vnd, ...it]).filter((q) => !used.has(q.id))
     combined = [...combined, ...rest.slice(0, total - combined.length)]
   }
 

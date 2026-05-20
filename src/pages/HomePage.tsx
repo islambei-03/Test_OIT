@@ -1,5 +1,5 @@
 ﻿import { Link } from 'react-router-dom'
-import { TEST_VND_NAME } from '../lib/questionPools'
+import { PROFILE_NAME, TEST_VND_NAME } from '../lib/questionPools'
 
 export default function HomePage() {
   return (
@@ -7,17 +7,17 @@ export default function HomePage() {
       <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Тренажёр аттестации</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
-          База: <span className="font-semibold text-zinc-800 dark:text-zinc-100">~100 вопросов по основам ИТ</span> и{' '}
-          <span className="font-semibold text-zinc-800 dark:text-zinc-100">тест «{TEST_VND_NAME}»</span> (профильные документы и
-          положение об отделе). В экзамене и смешанной тренировке — пропорция{' '}
-          <span className="font-semibold">⅓ «{TEST_VND_NAME}» + ⅔ ИТ</span> (например, 15 вопросов → 5 и 10).
+          База: <span className="font-semibold">основы ИТ</span>, тема{' '}
+          <span className="font-semibold">«{PROFILE_NAME}»</span> (папка «Тест Профильные») и тема{' '}
+          <span className="font-semibold">«{TEST_VND_NAME}»</span> (папка «Положение об отделе»). В экзамене — смешанный
+          набор: примерно ⅓ служебных вопросов и ⅔ по ИТ.
         </p>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-700 dark:bg-zinc-950/50">
             <div className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">Тренировка</div>
             <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">С подсказками</div>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              Тема «{TEST_VND_NAME}», отдельные документы или смешанный режим с основами ИТ.
+              Отдельно «{PROFILE_NAME}», «{TEST_VND_NAME}» или смешанный режим с ИТ.
             </p>
             <Link
               to="/training"
@@ -31,7 +31,7 @@ export default function HomePage() {
             <div className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">Экзамен</div>
             <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">Таймер и отчёт</div>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              Смешанный тест («{TEST_VND_NAME}» + ИТ), результат в базу. Проходной балл — 70%.
+              Смешанный тест (служебные + ИТ), результат сохраняется в базу.
             </p>
             <Link
               to="/exam"
@@ -46,7 +46,6 @@ export default function HomePage() {
       <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Админ-панель</h2>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          Статистика, вопросы, импорт.{' '}
           <Link to="/admin" className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400">
             /admin
           </Link>
