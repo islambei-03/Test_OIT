@@ -1,60 +1,73 @@
+import { useLayoutEffect, useState } from 'react'
 import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import AdminPage from './pages/AdminPage'
 import ExamPage from './pages/ExamPage'
 import HomePage from './pages/HomePage'
 import TrainingPage from './pages/TrainingPage'
 
+type ThemeChoice = 'light' | 'dark'
+
 export default function App() {
   const location = useLocation()
+  const [theme, setTheme] = useState<ThemeChoice>(() => {
+    const saved = localStorage.getItem('theme') as ThemeChoice | null
+    if (saved === 'light' || saved === 'dark') return saved
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
+    return 'light'
+  })
+
+  useLayoutEffect(() => {
+    localStorage.setItem('theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  const nav = [
+    { to: '/training', label: 'Тренировка' },
+    { to: '/exam', label: 'Экзамен' },
+    { to: '/admin', label: 'Админ' },
+  ]
 
   return (
-    <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
-      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/80 dark:border-slate-800/70 dark:bg-slate-950/70 backdrop-blur">
+    <div className="min-h-dvh bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50">
+      <header className="sticky top-0 z-20 border-b border-zinc-200/80 bg-white/90 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/90">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white font-semibold">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-sm font-bold text-white shadow-sm">
               IT
             </div>
             <div className="leading-tight">
-              <div className="text-sm text-slate-500 dark:text-slate-400">Тренажер к аттестации</div>
-              <div className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Подготовка сотрудников
-              </div>
+              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Тренажёр аттестации</div>
+              <div className="text-base font-semibold text-zinc-900 dark:text-zinc-50">Подготовка сотрудников</div>
             </div>
           </div>
 
-          <nav className="hidden sm:flex items-center gap-4 text-sm">
-            <Link
-              to="/training"
-              className={
-                location.pathname === '/training'
-                  ? 'font-semibold text-slate-900 dark:text-slate-100'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
-              }
+          <div className="flex items-center gap-2">
+            <nav className="hidden items-center gap-1 sm:flex">
+              {nav.map((item) => {
+                const active = location.pathname === item.to
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={
+                      active
+                        ? 'rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white'
+                        : 'rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-50'
+                    }
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </nav>
+            <button
+              type="button"
+              onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              Тренировка
-            </Link>
-            <Link
-              to="/exam"
-              className={
-                location.pathname === '/exam'
-                  ? 'font-semibold text-slate-900 dark:text-slate-100'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
-              }
-            >
-              Экзамен
-            </Link>
-            <Link
-              to="/admin"
-              className={
-                location.pathname === '/admin'
-                  ? 'font-semibold text-violet-700 dark:text-violet-400'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-              }
-            >
-              Админ
-            </Link>
-          </nav>
+              {theme === 'dark' ? 'Светлая' : 'Тёмная'}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -67,13 +80,10 @@ export default function App() {
           <Route
             path="*"
             element={
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900/60">
-                <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">Страница не найдена</div>
-                <div className="mt-2 text-slate-600 dark:text-slate-300">
-                  Вернитесь на главную.
-                </div>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Страница не найдена</div>
                 <div className="mt-4">
-                  <Link to="/" className="text-violet-600 hover:underline dark:text-violet-400">
+                  <Link to="/" className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400">
                     На главную
                   </Link>
                 </div>

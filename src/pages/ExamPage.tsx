@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchCatalog, getNextAttemptNo, saveExamAttempt, type Category, type ExamAttemptErrorItem, type ExamType, type Question, type QuestionAnswer } from '../lib/db'
+import { pickMixedQuestions, splitVndItCounts } from '../lib/questionPools'
 import { supabaseConfigured } from '../lib/supabaseClient'
 
 type ExamSessionQuestion = {
@@ -46,10 +47,6 @@ function shuffle<T>(arr: T[]) {
     ;[copy[i], copy[j]] = [copy[j], copy[i]]
   }
   return copy
-}
-
-function pickRandom<T>(arr: T[], count: number) {
-  return shuffle(arr).slice(0, count)
 }
 
 const PASS_PERCENT = 70
@@ -131,12 +128,16 @@ export default function ExamPage() {
     setExamQuestionCount((c) => Math.min(Math.max(c, examCountBounds.min), examCountBounds.max))
   }, [examCountBounds])
 
+  const mixPreview = useMemo(() => {
+    const n = Math.min(examQuestionCount, catalog?.questions.length ?? examQuestionCount)
+    return splitVndItCounts(n)
+  }, [examQuestionCount, catalog])
+
   function buildSessionQuestions(count: number) {
     if (!catalog) return []
 
-    const all = catalog.questions
-    const n = Math.min(Math.max(5, count), all.length)
-    const selected = pickRandom(all, n)
+    const n = Math.min(Math.max(5, count), catalog.questions.length)
+    const selected = pickMixedQuestions(catalog.questions, catalog.categories, n)
     return selected.map((q) => {
       const correct = q.answers.find((a) => a.is_correct)
       const correctOptionIndex = correct?.option_index ?? 0
@@ -424,8 +425,8 @@ export default function ExamPage() {
                 Макс. ({examCountBounds.max})
               </button>
             </div>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              Таймер подстраивается под выбранное число (от 3 минут минимум).
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+              Состав теста: ~{mixPreview.vnd} вопросов ВНД и ~{mixPreview.it} по основам ИТ. Таймер от 3 минут.
             </p>
           </div>
 

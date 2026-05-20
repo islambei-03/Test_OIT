@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Category, Question, QuestionAnswer } from '../lib/db'
 import { fetchCatalog } from '../lib/db'
+import { MIXED_TOPIC_ID, isVndCategoryName, pickMixedQuestions, splitVndItCounts } from '../lib/questionPools'
 import { Link } from 'react-router-dom'
 import { supabaseConfigured } from '../lib/supabaseClient'
 
@@ -81,7 +82,7 @@ export default function TrainingPage() {
         const c = await fetchCatalog()
         if (!mounted) return
         setCatalog(c)
-        if (c.categories.length > 0) setTopicId(c.categories[0].id)
+        if (c.categories.length > 0) setTopicId(MIXED_TOPIC_ID)
       } catch (e) {
         if (!mounted) return
         setCatalog(null)
@@ -97,14 +98,33 @@ export default function TrainingPage() {
 
   const topic = useMemo(() => {
     if (!catalog) return null
+    if (topicId === MIXED_TOPIC_ID) {
+      return { id: MIXED_TOPIC_ID, name: 'Смешанный (⅓ ВНД + ⅔ ИТ)' } satisfies Category
+    }
     return catalog.categories.find((c) => c.id === topicId) ?? null
   }, [catalog, topicId])
 
+  const isMixedTopic = topicId === MIXED_TOPIC_ID
+
   const filteredQuestions = useMemo(() => {
     if (!catalog || !topicId) return []
-    const list = catalog.questions.filter((q) => q.category_id === topicId)
-    return list
-  }, [catalog, topicId])
+    if (isMixedTopic) return catalog.questions
+    return catalog.questions.filter((q) => q.category_id === topicId)
+  }, [catalog, topicId, isMixedTopic])
+
+  const mixPreview = useMemo(() => {
+    const n = Math.min(trainingQuestionCount, filteredQuestions.length || trainingQuestionCount)
+    return splitVndItCounts(n)
+  }, [trainingQuestionCount, filteredQuestions.length])
+
+  const vndCategories = useMemo(
+    () => (catalog ? catalog.categories.filter((c) => isVndCategoryName(c.name)) : []),
+    [catalog],
+  )
+  const itCategories = useMemo(
+    () => (catalog ? catalog.categories.filter((c) => !isVndCategoryName(c.name)) : []),
+    [catalog],
+  )
 
   const trainingCountBounds = useMemo(() => {
     const n = catalog?.questions.length ?? 0
@@ -118,13 +138,26 @@ export default function TrainingPage() {
   }, [trainingCountBounds])
 
   function buildSessionQuestions(): TrainingSessionQuestion[] {
-    if (!topic) return []
+    if (!topic || !catalog) return []
+
+    const length = Math.min(Math.max(5, trainingQuestionCount), catalog.questions.length)
+
+    if (isMixedTopic) {
+      const picked = pickMixedQuestions(catalog.questions, catalog.categories, length)
+      return picked.map((q) => {
+        const correct = q.answers.find((a) => a.is_correct)
+        return {
+          question: q,
+          answers: [...q.answers],
+          correctOptionIndex: correct?.option_index ?? 0,
+        }
+      })
+    }
+
     const topicPool = filteredQuestions
-    const allPool = catalog ? catalog.questions : topicPool
+    const allPool = catalog.questions
     const allWrongIds = repeatErrors ? getLocalWrongIds(topic.id) : []
     const wrongSet = new Set(allWrongIds)
-
-    const length = Math.min(Math.max(5, trainingQuestionCount), allPool.length)
 
     const wrongFirst = topicPool
       .filter((q) => wrongSet.has(q.id))
@@ -276,13 +309,27 @@ export default function TrainingPage() {
                 <select
                   value={topicId}
                   onChange={(e) => setTopicId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950"
+                  className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 >
-                  {catalog.categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ ВНД + ⅔ ИТ)</option>
+                  {vndCategories.length > 0 ? (
+                    <optgroup label="ВНД">
+                      {vndCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name.replace(/^ВНД:\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {itCategories.length > 0 ? (
+                    <optgroup label="Основы ИТ">
+                      {itCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                 </select>
               </label>
 
@@ -339,8 +386,10 @@ export default function TrainingPage() {
                     Макс. ({trainingCountBounds.max})
                   </button>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Если в теме мало вопросов, недостающие добираются случайно из всей базы (до выбранного числа).
+                <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                  {isMixedTopic
+                    ? `Смешанный режим: ~${mixPreview.vnd} вопросов ВНД и ~${mixPreview.it} по основам ИТ.`
+                    : 'Если в теме мало вопросов, недостающие добираются из всей базы.'}
                 </p>
               </div>
 

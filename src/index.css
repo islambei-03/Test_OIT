@@ -9,7 +9,11 @@ html {
 body {
   margin: 0;
   min-height: 100%;
-  @apply bg-slate-50 text-slate-900;
+  @apply bg-zinc-100 text-zinc-900;
+}
+
+[data-theme='dark'] body {
+  @apply bg-zinc-950 text-zinc-50;
 }
 
 #app {
