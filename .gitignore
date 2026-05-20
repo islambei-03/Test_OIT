@@ -13,8 +13,10 @@ dist-ssr
 *.local
 .env
 
-# Исходники ВНД (длинные имена ломают clone на Vercel); импорт: python scripts/import_vnd_docx.py
+# Исходники DOCX (длинные имена ломают clone на Vercel); импорт: python scripts/import_vnd_docx.py
+Тест Профильные/
 Тест по ВНД/
+Положение об отделе/
 
 # Editor directories and files
 .vscode/*

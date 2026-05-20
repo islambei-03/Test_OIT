@@ -1,7 +1,10 @@
 import type { Category, QuestionAnswer } from './db'
 
-export const VND_CATEGORY_PREFIX = 'ВНД:'
+/** Название блока вопросов ВНД в интерфейсе и префикс категорий в БД */
+export const TEST_VND_NAME = 'Тест ВНД'
+export const TEST_VND_CATEGORY_PREFIX = `${TEST_VND_NAME} · `
 export const MIXED_TOPIC_ID = '__mixed__'
+export const VND_ALL_TOPIC_ID = '__vnd_all__'
 
 export type QuestionWithAnswers = {
   id: string
@@ -12,14 +15,35 @@ export type QuestionWithAnswers = {
 }
 
 export function isVndCategoryName(name: string) {
-  return name.trim().startsWith(VND_CATEGORY_PREFIX)
+  const n = name.trim()
+  return (
+    n === TEST_VND_NAME ||
+    n.startsWith(TEST_VND_CATEGORY_PREFIX) ||
+    n.startsWith(`${TEST_VND_NAME}:`) ||
+    n.startsWith('ВНД:') // старые категории до переимпорта
+  )
 }
 
-/** Доля ВНД ≈ 1/3, основы ИТ ≈ 2/3 (15 → 5 + 10). */
+/** Доля «Тест ВНД» ≈ 1/3, основы ИТ ≈ 2/3 (15 → 5 + 10). */
 export function splitVndItCounts(total: number) {
   const safe = Math.max(1, total)
   const vnd = Math.floor(safe / 3)
   return { vnd, it: safe - vnd }
+}
+
+export function pluralRuQuestions(n: number) {
+  const n10 = Math.abs(n) % 10
+  const n100 = Math.abs(n) % 100
+  if (n100 >= 11 && n100 <= 14) return 'вопросов'
+  if (n10 === 1) return 'вопрос'
+  if (n10 >= 2 && n10 <= 4) return 'вопроса'
+  return 'вопросов'
+}
+
+export function describeMixedComposition(total: number) {
+  const n = Math.max(1, total)
+  const { vnd, it } = splitVndItCounts(n)
+  return `Из ${n} ${pluralRuQuestions(n)}: ${vnd} ${pluralRuQuestions(vnd)} по «${TEST_VND_NAME}» и ${it} ${pluralRuQuestions(it)} по основам ИТ. Пропорция ≈ ⅓ и ⅔.`
 }
 
 function shuffle<T>(arr: T[]) {
@@ -50,7 +74,12 @@ export function partitionQuestionsByPool(
   return { vnd, it }
 }
 
-/** Смешанная выборка: ~⅓ ВНД + ~⅔ ИТ; при нехватке добираем из другого пула. */
+export function filterVndQuestions(questions: QuestionWithAnswers[], categories: Category[]) {
+  const nameById = new Map(categories.map((c) => [c.id, c.name]))
+  return questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
+}
+
+/** Смешанная выборка: ~⅓ Тест ВНД + ~⅔ ИТ */
 export function pickMixedQuestions(
   questions: QuestionWithAnswers[],
   categories: Category[],

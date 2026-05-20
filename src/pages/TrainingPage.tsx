@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Category, Question, QuestionAnswer } from '../lib/db'
 import { fetchCatalog } from '../lib/db'
-import { MIXED_TOPIC_ID, isVndCategoryName, pickMixedQuestions, splitVndItCounts } from '../lib/questionPools'
+import {
+  MIXED_TOPIC_ID,
+  TEST_VND_NAME,
+  VND_ALL_TOPIC_ID,
+  describeMixedComposition,
+  filterVndQuestions,
+  isVndCategoryName,
+  pickMixedQuestions,
+} from '../lib/questionPools'
 import { Link } from 'react-router-dom'
 import { supabaseConfigured } from '../lib/supabaseClient'
 
@@ -99,23 +107,28 @@ export default function TrainingPage() {
   const topic = useMemo(() => {
     if (!catalog) return null
     if (topicId === MIXED_TOPIC_ID) {
-      return { id: MIXED_TOPIC_ID, name: 'Смешанный (⅓ ВНД + ⅔ ИТ)' } satisfies Category
+      return { id: MIXED_TOPIC_ID, name: `Смешанный (⅓ ${TEST_VND_NAME} + ⅔ ИТ)` } satisfies Category
+    }
+    if (topicId === VND_ALL_TOPIC_ID) {
+      return { id: VND_ALL_TOPIC_ID, name: TEST_VND_NAME } satisfies Category
     }
     return catalog.categories.find((c) => c.id === topicId) ?? null
   }, [catalog, topicId])
 
   const isMixedTopic = topicId === MIXED_TOPIC_ID
+  const isVndAllTopic = topicId === VND_ALL_TOPIC_ID
 
   const filteredQuestions = useMemo(() => {
     if (!catalog || !topicId) return []
     if (isMixedTopic) return catalog.questions
+    if (isVndAllTopic) return filterVndQuestions(catalog.questions, catalog.categories)
     return catalog.questions.filter((q) => q.category_id === topicId)
-  }, [catalog, topicId, isMixedTopic])
+  }, [catalog, topicId, isMixedTopic, isVndAllTopic])
 
-  const mixPreview = useMemo(() => {
-    const n = Math.min(trainingQuestionCount, filteredQuestions.length || trainingQuestionCount)
-    return splitVndItCounts(n)
-  }, [trainingQuestionCount, filteredQuestions.length])
+  const mixedCompositionHint = useMemo(
+    () => describeMixedComposition(Math.min(trainingQuestionCount, filteredQuestions.length || trainingQuestionCount)),
+    [trainingQuestionCount, filteredQuestions.length],
+  )
 
   const vndCategories = useMemo(
     () => (catalog ? catalog.categories.filter((c) => isVndCategoryName(c.name)) : []),
@@ -311,12 +324,13 @@ export default function TrainingPage() {
                   onChange={(e) => setTopicId(e.target.value)}
                   className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 >
-                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ ВНД + ⅔ ИТ)</option>
+                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ {TEST_VND_NAME} + ⅔ ИТ)</option>
                   {vndCategories.length > 0 ? (
-                    <optgroup label="ВНД">
+                    <optgroup label={TEST_VND_NAME}>
+                      <option value={VND_ALL_TOPIC_ID}>Все вопросы «{TEST_VND_NAME}»</option>
                       {vndCategories.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name.replace(/^ВНД:\s*/i, '')}
+                          {c.name.replace(/^Тест ВНД\s*[·:]\s*/i, '').replace(/^ВНД:\s*/i, '')}
                         </option>
                       ))}
                     </optgroup>
@@ -386,10 +400,8 @@ export default function TrainingPage() {
                     Макс. ({trainingCountBounds.max})
                   </button>
                 </div>
-                <p className="text-xs text-zinc-600 dark:text-zinc-300">
-                  {isMixedTopic
-                    ? `Смешанный режим: ~${mixPreview.vnd} вопросов ВНД и ~${mixPreview.it} по основам ИТ.`
-                    : 'Если в теме мало вопросов, недостающие добираются из всей базы.'}
+                <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                  {isMixedTopic ? mixedCompositionHint : 'Если в теме мало вопросов, недостающие добираются из всей базы.'}
                 </p>
               </div>
 
