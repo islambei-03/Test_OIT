@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .env
 
+# Исходники ВНД (длинные имена ломают clone на Vercel); импорт: python scripts/import_vnd_docx.py
+Тест по ВНД/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
