@@ -7,6 +7,7 @@ export const TEST_VND_NAME = 'Тест ВНД'
 export const TEST_VND_CATEGORY_PREFIX = `${TEST_VND_NAME} · `
 
 export const MIXED_TOPIC_ID = '__mixed__'
+export const MIXED_TOPIC_LABEL = 'Смешанный 1/3 по ВНД и 2/3 по ИТ и Профильные'
 export const PROFILE_ALL_TOPIC_ID = '__profile_all__'
 export const VND_ALL_TOPIC_ID = '__vnd_all__'
 
@@ -29,15 +30,19 @@ export function isVndCategoryName(name: string) {
   return n === TEST_VND_NAME || n.startsWith(TEST_VND_CATEGORY_PREFIX) || n.startsWith(`${TEST_VND_NAME}:`)
 }
 
-/** Вопросы не по основам ИТ (для смешанного экзамена: ⅓ служебные + ⅔ ИТ) */
+/** Вопросы не по основам ИТ (профильные документы и «Тест ВНД») */
 export function isServiceDocCategoryName(name: string) {
   return isProfileCategoryName(name) || isVndCategoryName(name)
 }
 
-export function splitServiceItCounts(total: number) {
+/** Смешанный режим: ⅓ «Тест ВНД», ⅔ — «Профильные» + основы ИТ (поровну внутри ⅔). */
+export function splitMixedCounts(total: number) {
   const safe = Math.max(1, total)
-  const service = Math.floor(safe / 3)
-  return { service, it: safe - service }
+  const vnd = Math.floor(safe / 3)
+  const rest = safe - vnd
+  const profile = Math.floor(rest / 2)
+  const it = rest - profile
+  return { vnd, profile, it }
 }
 
 export function pluralRuQuestions(n: number) {
@@ -51,10 +56,8 @@ export function pluralRuQuestions(n: number) {
 
 export function describeMixedComposition(total: number) {
   const n = Math.max(1, total)
-  const { service, it } = splitServiceItCounts(n)
-  const profilePart = Math.floor(service / 2)
-  const vndPart = service - profilePart
-  return `Из ${n} ${pluralRuQuestions(n)}: ~${profilePart} «${PROFILE_NAME}», ~${vndPart} «${TEST_VND_NAME}», ~${it} по основам ИТ (всего служебных ≈ ⅓).`
+  const { vnd, profile, it } = splitMixedCounts(n)
+  return `Из ${n} ${pluralRuQuestions(n)}: ~${vnd} «${TEST_VND_NAME}», ~${profile} «${PROFILE_NAME}», ~${it} по основам ИТ.`
 }
 
 function shuffle<T>(arr: T[]) {
@@ -92,7 +95,7 @@ export function filterVndQuestions(questions: QuestionWithAnswers[], categories:
   return questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
 }
 
-/** Смешанная выборка: ~⅓ (Профильные + Тест ВНД) + ~⅔ ИТ */
+/** Смешанная выборка: ~⅓ «Тест ВНД», ~⅔ «Профильные» + основы ИТ */
 export function pickMixedQuestions(
   questions: QuestionWithAnswers[],
   categories: Category[],
@@ -103,13 +106,11 @@ export function pickMixedQuestions(
   const vnd = questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
   const it = questions.filter((q) => !isServiceDocCategoryName(nameById.get(q.category_id) ?? ''))
 
-  const { service: wantService, it: wantIt } = splitServiceItCounts(total)
-  const wantProfile = Math.floor(wantService / 2)
-  const wantVnd = wantService - wantProfile
+  const { vnd: wantVnd, profile: wantProfile, it: wantIt } = splitMixedCounts(total)
 
   let combined = [
-    ...pickRandom(profile, wantProfile),
     ...pickRandom(vnd, wantVnd),
+    ...pickRandom(profile, wantProfile),
     ...pickRandom(it, wantIt),
   ]
 

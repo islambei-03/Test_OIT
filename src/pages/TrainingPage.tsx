@@ -3,6 +3,7 @@ import type { Category, Question, QuestionAnswer } from '../lib/db'
 import { fetchCatalog } from '../lib/db'
 import {
   MIXED_TOPIC_ID,
+  MIXED_TOPIC_LABEL,
   PROFILE_ALL_TOPIC_ID,
   PROFILE_NAME,
   TEST_VND_NAME,
@@ -111,7 +112,7 @@ export default function TrainingPage() {
   const topic = useMemo(() => {
     if (!catalog) return null
     if (topicId === MIXED_TOPIC_ID) {
-      return { id: MIXED_TOPIC_ID, name: `Смешанный (⅓ служебные + ⅔ ИТ)` } satisfies Category
+      return { id: MIXED_TOPIC_ID, name: MIXED_TOPIC_LABEL } satisfies Category
     }
     if (topicId === PROFILE_ALL_TOPIC_ID) {
       return { id: PROFILE_ALL_TOPIC_ID, name: PROFILE_NAME } satisfies Category
@@ -340,7 +341,7 @@ export default function TrainingPage() {
                   onChange={(e) => setTopicId(e.target.value)}
                   className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 >
-                  <option value={MIXED_TOPIC_ID}>Смешанный (⅓ служебные + ⅔ ИТ)</option>
+                  <option value={MIXED_TOPIC_ID}>{MIXED_TOPIC_LABEL}</option>
                   {profileCategories.length > 0 ? (
                     <optgroup label={PROFILE_NAME}>
                       <option value={PROFILE_ALL_TOPIC_ID}>Все вопросы «{PROFILE_NAME}»</option>
