@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchCatalog, fetchExamAttempts, type Category, type QuestionAnswer, createCategory, createQuestion, deleteQuestion, updateQuestion } from '../lib/db'
+import {
+  compareBool,
+  compareNumber,
+  compareText,
+  normalizeSearch,
+  paginate,
+  toggleSortKey,
+  type SortDir,
+} from '../lib/adminListUtils'
+import {
+  isProfileCategoryName,
+  isVndCategoryName,
+  PROFILE_NAME,
+  TEST_VND_NAME,
+} from '../lib/questionPools'
+import SortableTh from '../components/admin/SortableTh'
 import Modal from '../components/Modal'
 
 type ExamAttemptRow = {
@@ -79,6 +95,20 @@ export default function AdminPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed'>('all')
+  const [examTypeFilter, setExamTypeFilter] = useState<'all' | 'exam' | 'trial'>('all')
+  const [attemptSortKey, setAttemptSortKey] = useState<'fio' | 'finished_at' | 'score_percent' | 'passed' | 'attempt_no'>(
+    'finished_at',
+  )
+  const [attemptSortDir, setAttemptSortDir] = useState<SortDir>('desc')
+
+  const [questionSearch, setQuestionSearch] = useState('')
+  const [questionCategoryId, setQuestionCategoryId] = useState('')
+  const [questionGroupFilter, setQuestionGroupFilter] = useState<'all' | 'profile' | 'vnd' | 'it'>('all')
+  const [questionSortKey, setQuestionSortKey] = useState<'category' | 'question'>('category')
+  const [questionSortDir, setQuestionSortDir] = useState<SortDir>('asc')
+  const [questionPage, setQuestionPage] = useState(1)
+  const [questionPageSize, setQuestionPageSize] = useState(25)
+  const [categorySearch, setCategorySearch] = useState('')
 
   const [selectedFio, setSelectedFio] = useState<string | null>(null)
 
@@ -148,10 +178,11 @@ export default function AdminPage() {
     const from = parseDateInput(dateFrom)
     const to = parseDateInput(dateTo)
 
-    return attempts.filter((a) => {
+    const filtered = attempts.filter((a) => {
       if (q && !a.fio.toLowerCase().includes(q)) return false
       if (statusFilter === 'passed' && !a.passed) return false
       if (statusFilter === 'failed' && a.passed) return false
+      if (examTypeFilter !== 'all' && a.exam_type !== examTypeFilter) return false
       if (from || to) {
         const d = new Date(a.finished_at)
         if (Number.isNaN(d.getTime())) return false
@@ -164,7 +195,139 @@ export default function AdminPage() {
       }
       return true
     })
-  }, [attempts, searchFio, dateFrom, dateTo, statusFilter])
+
+    const sorted = [...filtered]
+    sorted.sort((a, b) => {
+      switch (attemptSortKey) {
+        case 'fio':
+          return compareText(a.fio, b.fio, attemptSortDir)
+        case 'score_percent':
+          return compareNumber(Number(a.score_percent ?? 0), Number(b.score_percent ?? 0), attemptSortDir)
+        case 'passed':
+          return compareBool(Boolean(a.passed), Boolean(b.passed), attemptSortDir)
+        case 'attempt_no':
+          return compareNumber(Number(a.attempt_no ?? 0), Number(b.attempt_no ?? 0), attemptSortDir)
+        case 'finished_at':
+        default: {
+          const ta = new Date(a.finished_at).getTime()
+          const tb = new Date(b.finished_at).getTime()
+          return compareNumber(ta, tb, attemptSortDir)
+        }
+      }
+    })
+    return sorted
+  }, [attempts, searchFio, dateFrom, dateTo, statusFilter, examTypeFilter, attemptSortKey, attemptSortDir])
+
+  const categoryNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of catalog?.categories ?? []) map.set(c.id, c.name)
+    return map
+  }, [catalog])
+
+  const categoryGroups = useMemo(() => {
+    if (!catalog) return { profile: [] as Category[], vnd: [] as Category[], it: [] as Category[] }
+    const profile: Category[] = []
+    const vnd: Category[] = []
+    const it: Category[] = []
+    for (const c of catalog.categories) {
+      if (isProfileCategoryName(c.name)) profile.push(c)
+      else if (isVndCategoryName(c.name)) vnd.push(c)
+      else it.push(c)
+    }
+    return { profile, vnd, it }
+  }, [catalog])
+
+  const categoryStats = useMemo(() => {
+    if (!catalog) return []
+    const counts = new Map<string, number>()
+    for (const q of catalog.questions) counts.set(q.category_id, (counts.get(q.category_id) ?? 0) + 1)
+    const qNorm = normalizeSearch(categorySearch)
+    return catalog.categories
+      .map((c) => ({ ...c, count: counts.get(c.id) ?? 0 }))
+      .filter((c) => !qNorm || normalizeSearch(c.name).includes(qNorm))
+      .sort((a, b) => compareText(a.name, b.name, 'asc'))
+  }, [catalog, categorySearch])
+
+  const filteredQuestions = useMemo(() => {
+    if (!catalog) return []
+    const qNorm = normalizeSearch(questionSearch)
+
+    const list = catalog.questions.filter((q) => {
+      const catName = categoryNameById.get(q.category_id) ?? ''
+      if (questionCategoryId && q.category_id !== questionCategoryId) return false
+      if (questionGroupFilter === 'profile' && !isProfileCategoryName(catName)) return false
+      if (questionGroupFilter === 'vnd' && !isVndCategoryName(catName)) return false
+      if (questionGroupFilter === 'it' && (isProfileCategoryName(catName) || isVndCategoryName(catName))) return false
+      if (!qNorm) return true
+      if (normalizeSearch(q.question_text).includes(qNorm)) return true
+      if (normalizeSearch(q.explanation ?? '').includes(qNorm)) return true
+      if (normalizeSearch(catName).includes(qNorm)) return true
+      return (q.answers ?? []).some((a: QuestionAnswer) => normalizeSearch(a.option_text).includes(qNorm))
+    })
+
+    list.sort((a, b) => {
+      const catA = categoryNameById.get(a.category_id) ?? ''
+      const catB = categoryNameById.get(b.category_id) ?? ''
+      if (questionSortKey === 'category') {
+        const byCat = compareText(catA, catB, questionSortDir)
+        if (byCat !== 0) return byCat
+        return compareText(a.question_text, b.question_text, 'asc')
+      }
+      const byQ = compareText(a.question_text, b.question_text, questionSortDir)
+      if (byQ !== 0) return byQ
+      return compareText(catA, catB, 'asc')
+    })
+    return list
+  }, [
+    catalog,
+    categoryNameById,
+    questionSearch,
+    questionCategoryId,
+    questionGroupFilter,
+    questionSortKey,
+    questionSortDir,
+  ])
+
+  const questionsPage = useMemo(
+    () => paginate(filteredQuestions, questionPage, questionPageSize),
+    [filteredQuestions, questionPage, questionPageSize],
+  )
+
+  useEffect(() => {
+    setQuestionPage(1)
+  }, [questionSearch, questionCategoryId, questionGroupFilter, questionSortKey, questionSortDir, questionPageSize])
+
+  function resetAttemptFilters() {
+    setSearchFio('')
+    setDateFrom('')
+    setDateTo('')
+    setStatusFilter('all')
+    setExamTypeFilter('all')
+    setAttemptSortKey('finished_at')
+    setAttemptSortDir('desc')
+  }
+
+  function resetQuestionFilters() {
+    setQuestionSearch('')
+    setQuestionCategoryId('')
+    setQuestionGroupFilter('all')
+    setQuestionSortKey('category')
+    setQuestionSortDir('asc')
+    setQuestionPage(1)
+    setCategorySearch('')
+  }
+
+  function setAttemptSort(next: typeof attemptSortKey) {
+    const t = toggleSortKey(attemptSortKey, attemptSortDir, next)
+    setAttemptSortKey(t.key)
+    setAttemptSortDir(t.dir)
+  }
+
+  function setQuestionSort(next: typeof questionSortKey) {
+    const t = toggleSortKey(questionSortKey, questionSortDir, next)
+    setQuestionSortKey(t.key)
+    setQuestionSortDir(t.dir)
+  }
 
   const selectedEmployeeAttempts = useMemo(() => {
     if (!selectedFio) return []
@@ -468,7 +631,7 @@ export default function AdminPage() {
               : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/60'
           }
         >
-          Dashboard
+          Результаты
         </button>
         <button
           type="button"
@@ -568,7 +731,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               <input
                 value={searchFio}
                 onChange={(e) => setSearchFio(e.target.value)}
@@ -579,36 +742,78 @@ export default function AdminPage() {
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
+                title="Дата с"
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
               />
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
+                title="Дата по"
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
               />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'passed' | 'failed')}
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
               >
                 <option value="all">Все статусы</option>
                 <option value="passed">СДАЛ</option>
                 <option value="failed">НЕ СДАЛ</option>
               </select>
+              <select
+                value={examTypeFilter}
+                onChange={(e) => setExamTypeFilter(e.target.value as 'all' | 'exam' | 'trial')}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
+              >
+                <option value="all">Все типы</option>
+                <option value="exam">Экзамен</option>
+                <option value="trial">Пробный</option>
+              </select>
+              <button
+                type="button"
+                onClick={resetAttemptFilters}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/60"
+              >
+                Сбросить
+              </button>
+            </div>
+
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              Показано {filteredAttempts.length} из {attempts.length} попыток
             </div>
 
             <div className="mt-4 overflow-auto rounded-2xl border border-slate-200 dark:border-slate-800">
               <table className="min-w-[720px] w-full border-collapse text-sm">
-                <thead className="bg-slate-50 text-left text-slate-600 dark:bg-slate-950/30 dark:text-slate-300">
+                <thead className="bg-slate-50 text-left dark:bg-slate-950/30">
                   <tr>
-                    <th className="p-3">ФИО</th>
-                    <th className="p-3">Дата</th>
-                    <th className="p-3">Баллы</th>
-                    <th className="p-3">Статус</th>
-                    <th className="p-3">Попытки</th>
-                    <th className="p-3">Вопросов</th>
-                    <th className="p-3"></th>
+                    <SortableTh label="ФИО" active={attemptSortKey === 'fio'} dir={attemptSortDir} onClick={() => setAttemptSort('fio')} />
+                    <SortableTh
+                      label="Дата"
+                      active={attemptSortKey === 'finished_at'}
+                      dir={attemptSortDir}
+                      onClick={() => setAttemptSort('finished_at')}
+                    />
+                    <SortableTh
+                      label="Баллы"
+                      active={attemptSortKey === 'score_percent'}
+                      dir={attemptSortDir}
+                      onClick={() => setAttemptSort('score_percent')}
+                    />
+                    <SortableTh
+                      label="Статус"
+                      active={attemptSortKey === 'passed'}
+                      dir={attemptSortDir}
+                      onClick={() => setAttemptSort('passed')}
+                    />
+                    <SortableTh
+                      label="Попытка"
+                      active={attemptSortKey === 'attempt_no'}
+                      dir={attemptSortDir}
+                      onClick={() => setAttemptSort('attempt_no')}
+                    />
+                    <th className="p-3 font-semibold text-slate-600 dark:text-slate-300">Вопросов</th>
+                    <th className="p-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -746,7 +951,9 @@ export default function AdminPage() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Управление вопросами</div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Создание/редактирование/удаление и назначение правильного ответа</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Всего {catalog.questions.length} · отфильтровано {filteredQuestions.length}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -764,6 +971,12 @@ export default function AdminPage() {
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Категории</div>
               <div className="flex flex-wrap gap-2">
                 <input
+                  value={categorySearch}
+                  onChange={(e) => setCategorySearch(e.target.value)}
+                  placeholder="Поиск категории"
+                  className="w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
+                />
+                <input
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="Новая категория"
@@ -779,53 +992,219 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {catalog.categories.map((c) => (
-                <div key={c.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
-                  {c.name}
-                </div>
+            <div className="mt-3 max-h-40 overflow-y-auto">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuestionCategoryId('')}
+                  className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                    !questionCategoryId
+                      ? 'border-violet-500 bg-violet-50 text-violet-800 dark:border-violet-400 dark:bg-violet-500/10 dark:text-violet-200'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200'
+                  }`}
+                >
+                  Все ({catalog.questions.length})
+                </button>
+                {categoryStats.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setQuestionCategoryId(c.id)}
+                    title={c.name}
+                    className={`max-w-xs truncate rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                      questionCategoryId === c.id
+                        ? 'border-violet-500 bg-violet-50 text-violet-800 dark:border-violet-400 dark:bg-violet-500/10 dark:text-violet-200'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-violet-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200'
+                    }`}
+                  >
+                    {c.name.length > 48 ? `${c.name.slice(0, 48)}…` : c.name} ({c.count})
+                  </button>
+                ))}
+                {categoryStats.length === 0 ? (
+                  <span className="text-sm text-slate-500 dark:text-slate-400">Нет категорий по запросу.</span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+              <label className="block xl:col-span-2">
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Поиск</span>
+                <input
+                  value={questionSearch}
+                  onChange={(e) => setQuestionSearch(e.target.value)}
+                  placeholder="Текст вопроса, пояснение, ответы, категория…"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Категория</span>
+                <select
+                  value={questionCategoryId}
+                  onChange={(e) => setQuestionCategoryId(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
+                >
+                  <option value="">Все категории</option>
+                  {categoryGroups.profile.length > 0 ? (
+                    <optgroup label={PROFILE_NAME}>
+                      {categoryGroups.profile.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {categoryGroups.vnd.length > 0 ? (
+                    <optgroup label={TEST_VND_NAME}>
+                      {categoryGroups.vnd.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {categoryGroups.it.length > 0 ? (
+                    <optgroup label="Основы ИТ">
+                      {categoryGroups.it.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">На странице</span>
+                <select
+                  value={questionPageSize}
+                  onChange={(e) => setQuestionPageSize(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Группа:</span>
+              {(
+                [
+                  ['all', 'Все'],
+                  ['profile', PROFILE_NAME],
+                  ['vnd', TEST_VND_NAME],
+                  ['it', 'Основы ИТ'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setQuestionGroupFilter(id)}
+                  className={
+                    questionGroupFilter === id
+                      ? 'rounded-xl border border-violet-500 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 dark:border-violet-400 dark:bg-violet-500/10 dark:text-violet-200'
+                      : 'rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200'
+                  }
+                >
+                  {label}
+                </button>
               ))}
+              <button
+                type="button"
+                onClick={resetQuestionFilters}
+                className="ml-auto rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200"
+              >
+                Сбросить фильтры
+              </button>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span>
+                Показано {questionsPage.rangeFrom}–{questionsPage.rangeTo} из {questionsPage.total}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={questionsPage.page <= 1}
+                  onClick={() => setQuestionPage((p) => Math.max(1, p - 1))}
+                  className="rounded-lg border border-slate-200 px-2 py-1 font-semibold disabled:opacity-40 dark:border-slate-700"
+                >
+                  ←
+                </button>
+                <span>
+                  {questionsPage.page} / {questionsPage.totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={questionsPage.page >= questionsPage.totalPages}
+                  onClick={() => setQuestionPage((p) => Math.min(questionsPage.totalPages, p + 1))}
+                  className="rounded-lg border border-slate-200 px-2 py-1 font-semibold disabled:opacity-40 dark:border-slate-700"
+                >
+                  →
+                </button>
+              </div>
             </div>
           </div>
 
           <div className="mt-4 overflow-auto rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <table className="min-w-[900px] w-full border-collapse text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600 dark:bg-slate-950/30 dark:text-slate-300">
+              <thead className="bg-slate-50 text-left dark:bg-slate-950/30">
                 <tr>
-                  <th className="p-3">Категория</th>
-                  <th className="p-3">Вопрос</th>
-                  <th className="p-3">Ответы</th>
-                  <th className="p-3"></th>
+                  <SortableTh
+                    label="Категория"
+                    active={questionSortKey === 'category'}
+                    dir={questionSortDir}
+                    onClick={() => setQuestionSort('category')}
+                  />
+                  <SortableTh
+                    label="Вопрос"
+                    active={questionSortKey === 'question'}
+                    dir={questionSortDir}
+                    onClick={() => setQuestionSort('question')}
+                  />
+                  <th className="p-3 font-semibold text-slate-600 dark:text-slate-300">Ответы</th>
+                  <th className="p-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {catalog.questions.map((q) => {
-                  const catName = catalog.categories.find((c) => c.id === q.category_id)?.name ?? q.category_id
-                  const answersSorted = Array.isArray(q.answers) ? [...q.answers].sort((a: any, b: any) => a.option_index - b.option_index) : []
+                {questionsPage.items.map((q) => {
+                  const catName = categoryNameById.get(q.category_id) ?? q.category_id
+                  const answersSorted = Array.isArray(q.answers) ? [...q.answers].sort((a, b) => a.option_index - b.option_index) : []
+                  const shortCat = catName.length > 56 ? `${catName.slice(0, 56)}…` : catName
                   return (
                     <tr key={q.id} className="align-top hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                      <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{catName}</td>
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-900 dark:text-slate-100">{q.question_text}</div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{q.explanation ? q.explanation.slice(0, 120) : ''}</div>
+                      <td className="p-3 max-w-[220px]">
+                        <div className="font-semibold text-slate-900 dark:text-slate-100" title={catName}>
+                          {shortCat}
+                        </div>
                       </td>
-                      <td className="p-3">
+                      <td className="p-3 max-w-md">
+                        <div className="font-semibold text-slate-900 dark:text-slate-100 line-clamp-3">{q.question_text}</div>
+                        {q.explanation ? (
+                          <div className="mt-1 text-xs text-slate-500 line-clamp-2 dark:text-slate-400">{q.explanation}</div>
+                        ) : null}
+                      </td>
+                      <td className="p-3 min-w-[200px]">
                         <div className="space-y-1 text-xs text-slate-600 dark:text-slate-300">
-                          {answersSorted.slice(0, 4).map((a: any, idx: number) => (
-                            <div key={a.id ?? idx}>
-                              {String.fromCharCode(65 + idx)}: {a.option_text} {a.is_correct ? '✓' : ''}
+                          {answersSorted.slice(0, 4).map((a, idx) => (
+                            <div key={a.id ?? idx} className={a.is_correct ? 'font-semibold text-emerald-700 dark:text-emerald-400' : ''}>
+                              {String.fromCharCode(65 + idx)}: {a.option_text.length > 80 ? `${a.option_text.slice(0, 80)}…` : a.option_text}
+                              {a.is_correct ? ' ✓' : ''}
                             </div>
                           ))}
                         </div>
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right whitespace-nowrap">
                         <div className="flex flex-wrap justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => openEditQuestion(q.id)}
                             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/60"
                           >
-                            Редактировать
+                            Изменить
                           </button>
                           <button
                             type="button"
@@ -839,10 +1218,12 @@ export default function AdminPage() {
                     </tr>
                   )
                 })}
-                {catalog.questions.length === 0 ? (
+                {filteredQuestions.length === 0 ? (
                   <tr>
                     <td className="p-4 text-center text-sm text-slate-600 dark:text-slate-300" colSpan={4}>
-                      Нет вопросов. Добавьте первый.
+                      {catalog.questions.length === 0
+                        ? 'Нет вопросов. Добавьте первый.'
+                        : 'Ничего не найдено. Измените фильтры или сбросьте их.'}
                     </td>
                   </tr>
                 ) : null}
@@ -953,11 +1334,33 @@ export default function AdminPage() {
               onChange={(e) => setQuestionDraft((d) => ({ ...d, category_id: e.target.value }))}
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100"
             >
-              {catalog?.categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              {categoryGroups.profile.length > 0 ? (
+                <optgroup label={PROFILE_NAME}>
+                  {categoryGroups.profile.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {categoryGroups.vnd.length > 0 ? (
+                <optgroup label={TEST_VND_NAME}>
+                  {categoryGroups.vnd.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {categoryGroups.it.length > 0 ? (
+                <optgroup label="Основы ИТ">
+                  {categoryGroups.it.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
           </label>
 
