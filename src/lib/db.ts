@@ -25,6 +25,33 @@ function toAppError(prefix: string, err: PostgrestError | null) {
   return new Error(`${prefix}: ${err.message}`)
 }
 
+const PAGE_SIZE = 1000
+
+/** PostgREST по умолчанию отдаёт не больше 1000 строк — подгружаем всё постранично. */
+async function fetchAllRows<T>(
+  table: 'questions' | 'exam_answers',
+  select: string,
+  orderBy?: { column: string; ascending?: boolean },
+): Promise<T[]> {
+  const supabase = requireSupabase()
+  const rows: T[] = []
+  let from = 0
+
+  while (true) {
+    let query = supabase.from(table).select(select).range(from, from + PAGE_SIZE - 1)
+    if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending ?? true })
+    const { data, error } = await query
+    const err = toAppError(table, error)
+    if (err) throw err
+    const chunk = (data ?? []) as T[]
+    rows.push(...chunk)
+    if (chunk.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+
+  return rows
+}
+
 export async function fetchCatalog(): Promise<{
   categories: Category[]
   questions: QuestionWithAnswers[]
@@ -38,19 +65,16 @@ export async function fetchCatalog(): Promise<{
   const categoriesErr = toAppError('categories', categoriesError)
   if (categoriesErr) throw categoriesErr
 
-  const { data: questionsRaw, error: questionsError } = await supabase
-    .from('questions')
-    .select('id, category_id, question_text, explanation')
+  const questionsRaw = await fetchAllRows<Question>('questions', 'id, category_id, question_text, explanation', {
+    column: 'id',
+    ascending: true,
+  })
 
-  const questionsErr = toAppError('questions', questionsError)
-  if (questionsErr) throw questionsErr
-
-  const { data: answersRaw, error: answersError } = await supabase
-    .from('exam_answers')
-    .select('id, question_id, option_index, option_text, is_correct')
-
-  const answersErr = toAppError('exam_answers', answersError)
-  if (answersErr) throw answersErr
+  const answersRaw = await fetchAllRows<QuestionAnswer>(
+    'exam_answers',
+    'id, question_id, option_index, option_text, is_correct',
+    { column: 'question_id', ascending: true },
+  )
 
   const answerByQuestionId = new Map<string, QuestionAnswer[]>()
   for (const a of answersRaw ?? []) {
