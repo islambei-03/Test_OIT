@@ -95,6 +95,49 @@ export function filterVndQuestions(questions: QuestionWithAnswers[], categories:
   return questions.filter((q) => isVndCategoryName(nameById.get(q.category_id) ?? ''))
 }
 
+export function filterQuestionsByTopicId(
+  questions: QuestionWithAnswers[],
+  categories: Category[],
+  topicId: string,
+): QuestionWithAnswers[] {
+  if (topicId === MIXED_TOPIC_ID) return questions
+  if (topicId === PROFILE_ALL_TOPIC_ID) return filterProfileQuestions(questions, categories)
+  if (topicId === VND_ALL_TOPIC_ID) return filterVndQuestions(questions, categories)
+  return questions.filter((q) => q.category_id === topicId)
+}
+
+export function resolveTopicLabel(categories: Category[], topicId: string): string {
+  if (topicId === MIXED_TOPIC_ID) return MIXED_TOPIC_LABEL
+  if (topicId === PROFILE_ALL_TOPIC_ID) return PROFILE_NAME
+  if (topicId === VND_ALL_TOPIC_ID) return TEST_VND_NAME
+  return categories.find((c) => c.id === topicId)?.name ?? topicId
+}
+
+export function questionHasAnswers(q: QuestionWithAnswers) {
+  return (
+    Array.isArray(q.answers) &&
+    q.answers.length >= 4 &&
+    q.answers.some((a) => a.is_correct) &&
+    q.answers.every((a) => String(a.option_text ?? '').trim().length > 0)
+  )
+}
+
+/** Случайная выборка вопросов по теме (смешанная или одна категория). */
+export function pickTopicQuestions(
+  questions: QuestionWithAnswers[],
+  categories: Category[],
+  topicId: string,
+  count: number,
+): QuestionWithAnswers[] {
+  const valid = questions.filter(questionHasAnswers)
+  if (topicId === MIXED_TOPIC_ID) {
+    return pickMixedQuestions(valid, categories, count)
+  }
+  const pool = filterQuestionsByTopicId(valid, categories, topicId)
+  const n = Math.min(Math.max(1, count), pool.length)
+  return shuffle([...pool]).slice(0, n)
+}
+
 /** Смешанная выборка: ~⅓ «Тест ВНД», ~⅔ «Профильные» + основы ИТ */
 export function pickMixedQuestions(
   questions: QuestionWithAnswers[],

@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchCatalog, getNextAttemptNo, saveExamAttempt, type Category, type ExamAttemptErrorItem, type ExamType, type Question, type QuestionAnswer } from '../lib/db'
-import { describeMixedComposition, pickMixedQuestions } from '../lib/questionPools'
+import {
+  MIXED_TOPIC_ID,
+  MIXED_TOPIC_LABEL,
+  PROFILE_ALL_TOPIC_ID,
+  PROFILE_NAME,
+  TEST_VND_NAME,
+  VND_ALL_TOPIC_ID,
+  describeMixedComposition,
+  filterQuestionsByTopicId,
+  isProfileCategoryName,
+  isVndCategoryName,
+  pickTopicQuestions,
+  questionHasAnswers,
+  resolveTopicLabel,
+} from '../lib/questionPools'
 import { supabaseConfigured } from '../lib/supabaseClient'
 
 type ExamSessionQuestion = {
@@ -61,12 +75,14 @@ export default function ExamPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [fio, setFio] = useState('')
+  const [topicId, setTopicId] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [examQuestionCount, setExamQuestionCount] = useState(20)
 
   const [session, setSession] = useState<{
     exam_type: ExamType
+    topic_label: string
     questions: ExamSessionQuestion[]
     idx: number
     responses: ExamResponse[]
@@ -104,6 +120,7 @@ export default function ExamPage() {
         const c = await fetchCatalog()
         if (!mounted) return
         setCatalog(c)
+        if (c.categories.length > 0) setTopicId(MIXED_TOPIC_ID)
       } catch (e) {
         if (!mounted) return
         setCatalog(null)
@@ -117,27 +134,56 @@ export default function ExamPage() {
     }
   }, [])
 
+  const isMixedTopic = topicId === MIXED_TOPIC_ID
+
+  const filteredQuestions = useMemo(() => {
+    if (!catalog || !topicId) return []
+    return filterQuestionsByTopicId(catalog.questions, catalog.categories, topicId).filter(questionHasAnswers)
+  }, [catalog, topicId])
+
+  const profileCategories = useMemo(
+    () => (catalog ? catalog.categories.filter((c) => isProfileCategoryName(c.name)) : []),
+    [catalog],
+  )
+  const vndCategories = useMemo(
+    () => (catalog ? catalog.categories.filter((c) => isVndCategoryName(c.name)) : []),
+    [catalog],
+  )
+  const itCategories = useMemo(
+    () =>
+      catalog
+        ? catalog.categories.filter((c) => !isProfileCategoryName(c.name) && !isVndCategoryName(c.name))
+        : [],
+    [catalog],
+  )
+
   const examCountBounds = useMemo(() => {
-    const n = catalog?.questions.length ?? 0
+    const n = filteredQuestions.length
     const max = Math.max(5, Math.min(100, n || 5))
     const min = Math.min(5, max)
-    return { min: min || 5, max }
-  }, [catalog])
+    return { min: min || 5, max, poolSize: n }
+  }, [filteredQuestions.length])
 
   useEffect(() => {
     setExamQuestionCount((c) => Math.min(Math.max(c, examCountBounds.min), examCountBounds.max))
   }, [examCountBounds])
 
   const mixedCompositionHint = useMemo(() => {
-    const n = Math.min(examQuestionCount, catalog?.questions.length ?? examQuestionCount)
+    if (!isMixedTopic) return null
+    const n = Math.min(examQuestionCount, filteredQuestions.length || examQuestionCount)
     return describeMixedComposition(n)
-  }, [examQuestionCount, catalog])
+  }, [examQuestionCount, filteredQuestions.length, isMixedTopic])
+
+  const topicLabel = useMemo(() => {
+    if (!catalog || !topicId) return ''
+    return resolveTopicLabel(catalog.categories, topicId)
+  }, [catalog, topicId])
 
   function buildSessionQuestions(count: number) {
-    if (!catalog) return []
+    if (!catalog || !topicId) return []
 
-    const n = Math.min(Math.max(5, count), catalog.questions.length)
-    const selected = pickMixedQuestions(catalog.questions, catalog.categories, n)
+    const n = Math.min(Math.max(examCountBounds.min, count), examCountBounds.max)
+    const selected = pickTopicQuestions(catalog.questions, catalog.categories, topicId, n)
     return selected.map((q) => {
       const correct = q.answers.find((a) => a.is_correct)
       const correctOptionIndex = correct?.option_index ?? 0
@@ -263,25 +309,31 @@ export default function ExamPage() {
   }, [session, catalog, fio])
 
   async function start(type: ExamType) {
-    if (!catalog) return
+    if (!catalog || !topicId) return
     const trimmed = fio.trim()
     if (!trimmed || trimmed.split(/\s+/).length < 2) {
       alert('Введите Имя Фамилия (минимум два слова).')
       return
     }
 
-    const n = Math.min(Math.max(5, examQuestionCount), catalog.questions.length)
+    if (examCountBounds.poolSize < examCountBounds.min) {
+      alert('В выбранной теме недостаточно вопросов с ответами. Выберите другую тему.')
+      return
+    }
+
+    const n = Math.min(Math.max(examCountBounds.min, examQuestionCount), examCountBounds.max)
     const base = type === 'exam' ? examSeconds : trialSeconds
     const duration_seconds = Math.max(180, Math.round((base * n) / 20))
     const questions = buildSessionQuestions(n)
-    if (questions.length === 0) {
-      alert('Недостаточно вопросов в базе.')
+    if (questions.length < examCountBounds.min) {
+      alert(`Недостаточно вопросов в теме «${topicLabel}». Доступно: ${questions.length}.`)
       return
     }
 
     setSelectedOptionIndex(null)
     setSession({
       exam_type: type,
+      topic_label: topicLabel,
       questions,
       idx: 0,
       responses: [],
@@ -369,7 +421,7 @@ export default function ExamPage() {
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
           <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Экзамен</h1>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-            Введите имя и фамилию. Далее экзамен начнётся случайным набором вопросов.
+            Введите имя и фамилию, выберите тему и количество вопросов.
           </p>
 
           <label className="mt-5 block">
@@ -380,6 +432,51 @@ export default function ExamPage() {
               placeholder="Иванов Иван"
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
             />
+          </label>
+
+          <label className="mt-5 block">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Тема</div>
+            <select
+              value={topicId}
+              onChange={(e) => setTopicId(e.target.value)}
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-violet-500/40 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+            >
+              <option value={MIXED_TOPIC_ID}>{MIXED_TOPIC_LABEL}</option>
+              {profileCategories.length > 0 ? (
+                <optgroup label={PROFILE_NAME}>
+                  <option value={PROFILE_ALL_TOPIC_ID}>Все вопросы «{PROFILE_NAME}»</option>
+                  {profileCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name.replace(/^Профильные\s*[·:]\s*/i, '')}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {vndCategories.length > 0 ? (
+                <optgroup label={TEST_VND_NAME}>
+                  <option value={VND_ALL_TOPIC_ID}>Все вопросы «{TEST_VND_NAME}»</option>
+                  {vndCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name.replace(/^Тест ВНД\s*[·:]\s*/i, '')}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {itCategories.length > 0 ? (
+                <optgroup label="Основы ИТ">
+                  {itCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
+            {!isMixedTopic ? (
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                В теме доступно {examCountBounds.poolSize} вопросов с ответами.
+              </p>
+            ) : null}
           </label>
 
           <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
@@ -426,7 +523,7 @@ export default function ExamPage() {
               </button>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
-              {mixedCompositionHint} Таймер от 3 минут.
+              {mixedCompositionHint ?? `Случайная выборка из темы «${topicLabel}».`} Таймер от 3 минут.
             </p>
           </div>
 
@@ -435,7 +532,7 @@ export default function ExamPage() {
               type="button"
               onClick={() => start('exam')}
               className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-black dark:bg-slate-100 dark:text-slate-900"
-              disabled={!fio.trim()}
+              disabled={!fio.trim() || !topicId || examCountBounds.poolSize < examCountBounds.min}
             >
               Начать экзамен ({examQuestionCount} вопросов)
             </button>
@@ -443,7 +540,7 @@ export default function ExamPage() {
               type="button"
               onClick={() => start('trial')}
               className="rounded-2xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-700"
-              disabled={!fio.trim()}
+              disabled={!fio.trim() || !topicId || examCountBounds.poolSize < examCountBounds.min}
             >
               Начать пробную аттестацию
             </button>
@@ -462,6 +559,7 @@ export default function ExamPage() {
               <div className="text-sm font-semibold text-violet-700 dark:text-violet-400">
                 {session.exam_type === 'exam' ? 'Экзамен' : 'Пробная аттестация'}
               </div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{session.topic_label}</div>
               <h2 className="mt-2 text-lg font-bold text-slate-900 dark:text-slate-100">
                 Вопрос {session.idx + 1} из {session.questions.length}
               </h2>

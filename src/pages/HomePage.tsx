@@ -31,7 +31,7 @@ export default function HomePage() {
             <div className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">Экзамен</div>
             <div className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">Таймер и отчёт</div>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-              {MIXED_TOPIC_LABEL}, результат сохраняется в базу.
+              Выбор темы как в тренировке: «{PROFILE_NAME}», «{TEST_VND_NAME}», ИТ или {MIXED_TOPIC_LABEL.toLowerCase()}.
             </p>
             <Link
               to="/exam"
